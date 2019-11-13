@@ -7,10 +7,11 @@ from django.forms.models import (
     BaseModelFormSet, modelformset_factory,
     ModelForm, _get_foreign_key, ModelFormMetaclass, ModelFormOptions
 )
-from django.db.models.fields.related import ForeignObjectRel
+from django.db.models.fields.related import ForeignObjectRel, OneToOneRel
 
-
+from modelcluster.fields import ParentalOneToOneField
 from modelcluster.models import get_all_child_relations
+
 
 
 class BaseTransientModelFormSet(BaseModelFormSet):
@@ -78,10 +79,16 @@ class BaseChildFormSet(BaseTransientModelFormSet):
             self.instance = self.fk.remote_field.model()
         else:
             self.instance = instance
+        is_one_to_one = isinstance(self.fk, ParentalOneToOneField)
+        if is_one_to_one:
+            self.rel_name = self.fk.name
+        else:
+            rmt_model = self.fk.remote_field.model
+            rmt_name = self.fk.remote_field.related_name
+            self.rel_name = ForeignObjectRel(
+                self.fk, rmt_model, related_name=rmt_name).get_accessor_name()
 
-        self.rel_name = ForeignObjectRel(self.fk, self.fk.remote_field.model, related_name=self.fk.remote_field.related_name).get_accessor_name()
-
-        if queryset is None:
+        if queryset is None and not is_one_to_one:
             queryset = getattr(self.instance, self.rel_name).all()
 
         super(BaseChildFormSet, self).__init__(data, files, queryset=queryset, **kwargs)
@@ -93,6 +100,7 @@ class BaseChildFormSet(BaseTransientModelFormSet):
         saved_instances = super(BaseChildFormSet, self).save(commit=False)
 
         manager = getattr(self.instance, self.rel_name)
+        is_modelcluster_manager = hasattr(manager, '__modelcluster__')
 
         # if model has a sort_order_field defined, assign order indexes to the attribute
         # named in it
@@ -107,14 +115,21 @@ class BaseChildFormSet(BaseTransientModelFormSet):
         # not just a selection of additions / updates) and so we delete all ID-less objects here
         # on the basis that they will be re-added by the formset saving mechanism.
         no_id_instances = [obj for obj in manager.all() if obj.pk is None]
-        if no_id_instances:
+        if no_id_instances and is_modelcluster_manager:
             manager.remove(*no_id_instances)
 
         manager.add(*saved_instances)
-        manager.remove(*self.deleted_objects)
+
+        # Django's manager does not have remove
+        if is_modelcluster_manager:
+            manager.remove(*self.deleted_objects)
+        elif commit:
+            # Django's manager manually deletes when commit=True
+            for obj in self.deleted_objects:
+                obj.delete()
 
         self.save_m2m()  # ensures any parental-m2m fields are saved.
-        if commit:
+        if commit and is_modelcluster_manager:
             manager.commit()
 
         return saved_instances
@@ -170,12 +185,17 @@ def childformset_factory(
     parent_model, model, form=ModelForm,
     formset=BaseChildFormSet, fk_name=None, fields=None, exclude=None,
     extra=3, can_order=False, can_delete=True, max_num=None, validate_max=False,
-    formfield_callback=None, widgets=None, min_num=None, validate_min=False
+    formfield_callback=None, widgets=None, min_num=None, validate_min=False,
+    fk=None
 ):
+    if fk is None:
+        is_one_to_one = False
+        fk = _get_foreign_key(parent_model, model, fk_name=fk_name)
+    else:
+        is_one_to_one = True
 
-    fk = _get_foreign_key(parent_model, model, fk_name=fk_name)
     # enforce a max_num=1 when the foreign key to the parent model is unique.
-    if fk.unique:
+    if is_one_to_one or fk.unique:
         max_num = 1
         validate_max = True
 
@@ -245,8 +265,11 @@ class ClusterFormMetaclass(ModelFormMetaclass):
                 # - the base model (opts.model)
                 # - the child model (rel.field.model)
                 # - the fk_name from the child model to the base (rel.field.name)
-
-                rel_name = rel.get_accessor_name()
+                is_one_to_one = isinstance(rel, OneToOneRel)
+                if is_one_to_one:
+                    rel_name = rel.field.name
+                else:
+                    rel_name = rel.get_accessor_name()
 
                 # apply 'formsets' and 'exclude_formsets' rules from meta
                 if opts.formsets is not None and rel_name not in opts.formsets:
@@ -266,6 +289,10 @@ class ClusterFormMetaclass(ModelFormMetaclass):
                     'fk_name': rel.field.name,
                     'widgets': widgets
                 }
+
+                if is_one_to_one:
+                    # pass in the fk field
+                    kwargs['fk'] = rel.field
 
                 # see if opts.formsets looks like a dict; if so, allow the value
                 # to override kwargs
