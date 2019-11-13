@@ -117,7 +117,7 @@ class BaseChildFormSet(BaseTransientModelFormSet):
         if no_id_instances and is_modelcluster_manager:
             manager.remove(*no_id_instances)
 
-        manager.add(*saved_instances)
+        manager.add(*saved_instances, bulk=False)
 
         # Django's manager does not have remove
         if is_modelcluster_manager:
