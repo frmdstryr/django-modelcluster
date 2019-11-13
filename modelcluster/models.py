@@ -11,7 +11,8 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.conf import settings
 from django.utils import timezone
 
-from modelcluster.fields import ParentalKey, ParentalManyToManyField
+from modelcluster.fields \
+    import ParentalKey, ParentalManyToManyField, ParentalOneToOneField
 
 
 def get_field_value(field, model):
@@ -124,12 +125,17 @@ def model_from_serializable_data(model, data, check_fks=True, strict_fks=False):
 def get_all_child_relations(model):
     """
     Return a list of RelatedObject records for child relations of the given model,
-    including ones attached to ancestors of the model
+    including ones attached to ancestors of the model and one to one fields.
     """
-    return [
+    fk_fields = [
         field for field in model._meta.get_fields()
         if isinstance(field.remote_field, ParentalKey)
     ]
+    one_to_one_fields = [
+        field.remote_field for field in model._meta.get_fields()
+        if isinstance(field, ParentalOneToOneField)
+    ]
+    return fk_fields + one_to_one_fields
 
 
 def get_all_child_m2m_relations(model):
@@ -196,10 +202,14 @@ class ClusterableModel(models.Model):
         super(ClusterableModel, self).save(update_fields=real_update_fields, **kwargs)
 
         for relation in relations_to_commit:
-            getattr(self, relation).commit()
+            mgr = getattr(self, relation)
+            if hasattr(mgr, 'commit'):
+                mgr.commit()
 
         for field in m2m_fields_to_commit:
-            getattr(self, field).commit()
+            mgr = getattr(self, field)
+            if hasattr(mgr, 'commit'):
+                mgr.commit()
 
     def serializable_data(self):
         obj = get_serializable_data_for_fields(self)

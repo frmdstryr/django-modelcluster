@@ -3,10 +3,12 @@ from __future__ import unicode_literals
 from django.core import checks
 from django.db import IntegrityError, router
 from django.db.models import CASCADE
-from django.db.models.fields.related import ForeignKey, ManyToManyField
+from django.db.models.fields.related \
+    import ForeignKey, OneToOneField, ManyToManyField
 from django.utils.functional import cached_property
 
-from django.db.models.fields.related import ReverseManyToOneDescriptor, ManyToManyDescriptor
+from django.db.models.fields.related import \
+    ReverseManyToOneDescriptor, ManyToManyDescriptor, ReverseOneToOneDescriptor
 
 
 from modelcluster.utils import sort_by_fields
@@ -28,6 +30,8 @@ def create_deferring_foreign_related_manager(related, original_manager_cls):
     superclass = rel_model._default_manager.__class__
 
     class DeferringRelatedManager(superclass):
+        __modelcluster__ = True
+
         def __init__(self, instance):
             super(DeferringRelatedManager, self).__init__()
             self.model = rel_model
@@ -107,7 +111,7 @@ def create_deferring_foreign_related_manager(related, original_manager_cls):
 
             return object_list
 
-        def add(self, *new_items):
+        def add(self, *new_items, **kwargs):
             """
             Add the passed items to the stored object set, but do not commit them
             to the database
@@ -216,6 +220,9 @@ class ChildObjectsDescriptor(ReverseManyToOneDescriptor):
     def __get__(self, instance, instance_type=None):
         if instance is None:
             return self
+        if instance.pk is not None:
+            # Deferring is not needed if the instance is already saved
+            return super().__get__(instance, instance_type)
 
         return self.child_object_manager_cls(instance)
 
@@ -276,6 +283,8 @@ def create_deferring_forward_many_to_many_manager(rel, original_manager_cls):
     superclass = rel_model._default_manager.__class__
 
     class DeferringManyRelatedManager(superclass):
+        __modelcluster__ = True
+
         def __init__(self, instance=None):
             super(DeferringManyRelatedManager, self).__init__()
             self.model = rel_model
@@ -334,7 +343,7 @@ def create_deferring_forward_many_to_many_manager(rel, original_manager_cls):
 
             return object_list
 
-        def add(self, *new_items):
+        def add(self, *new_items, **kwargs):
             """
             Add the passed items to the stored object set, but do not commit them
             to the database
@@ -427,6 +436,9 @@ class ParentalManyToManyDescriptor(ManyToManyDescriptor):
     def __get__(self, instance, instance_type=None):
         if instance is None:
             return self
+        if instance.pk is not None:
+            # Deferring is not needed if the instance is already saved
+            return super().__get__(instance, instance_type)
 
         return self.child_object_manager_cls(instance)
 
@@ -459,3 +471,17 @@ class ParentalManyToManyField(ManyToManyField):
         # returning an empty list on the basis that unsaved objects can't have related objects.
         # Remove that special case.
         return getattr(obj, self.attname).all()
+
+
+class RelObjectDescriptor(ReverseOneToOneDescriptor):
+    @property
+    def rel(self):
+        return self.related
+
+
+class ParentalOneToOneField(OneToOneField):
+    related_accessor_class = RelObjectDescriptor
+
+    def contribute_to_class(self, cls, name, **kwargs):
+        super().contribute_to_class(cls, name, **kwargs)
+        setattr(cls, self.name, self.related_accessor_class(self.remote_field))
