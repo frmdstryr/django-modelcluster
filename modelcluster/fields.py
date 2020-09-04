@@ -225,8 +225,7 @@ class ChildObjectsDescriptor(ReverseManyToOneDescriptor):
             return self
         if instance.pk is not None:
             # Deferring is not needed if the instance is already saved
-            return super().__get__(instance, instance_type)
-
+            return self.related_manager_cls(instance)
         return self.child_object_manager_cls(instance)
 
     def __set__(self, instance, value):
@@ -493,8 +492,7 @@ class ParentalManyToManyDescriptor(ManyToManyDescriptor):
             return self
         if instance.pk is not None:
             # Deferring is not needed if the instance is already saved
-            return super().__get__(instance, instance_type)
-
+            return self.related_manager_cls(instance)
         return self.child_object_manager_cls(instance)
 
     def __set__(self, instance, value):
@@ -504,7 +502,6 @@ class ParentalManyToManyDescriptor(ManyToManyDescriptor):
     @cached_property
     def child_object_manager_cls(self):
         rel = self.rel
-
         return create_deferring_forward_many_to_many_manager(rel, self.related_manager_cls)
 
 
@@ -518,7 +515,7 @@ class ParentalManyToManyField(ManyToManyField):
         # https://github.com/django/django/blob/6157cd6da1b27716e8f3d1ed692a6e33d970ae46/django/db/models/fields/related.py#L1538
         # So, we'll let the original contribute_to_class do its thing, and then overwrite
         # the accessor...
-        super(ParentalManyToManyField, self).contribute_to_class(cls, name, **kwargs)
+        super().contribute_to_class(cls, name, **kwargs)
         setattr(cls, self.name, self.related_accessor_class(self.remote_field))
 
     def value_from_object(self, obj):
