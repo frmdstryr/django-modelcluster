@@ -129,7 +129,7 @@ def get_all_child_relations(model):
     """
     fk_fields = [
         field for field in model._meta.get_fields()
-        if isinstance(field.remote_field, ParentalKey)
+        if isinstance(field.remote_field, (models.ForeignKey, ParentalKey))
     ]
     one_to_one_fields = [
         field.remote_field for field in model._meta.get_fields()

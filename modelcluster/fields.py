@@ -223,6 +223,7 @@ class ChildObjectsDescriptor(ReverseManyToOneDescriptor):
     def __get__(self, instance, instance_type=None):
         if instance is None:
             return self
+
         if instance.pk is not None:
             # Deferring is not needed if the instance is already saved
             return self.related_manager_cls(instance)
@@ -490,6 +491,7 @@ class ParentalManyToManyDescriptor(ManyToManyDescriptor):
     def __get__(self, instance, instance_type=None):
         if instance is None:
             return self
+
         if instance.pk is not None:
             # Deferring is not needed if the instance is already saved
             return self.related_manager_cls(instance)
