@@ -5,6 +5,7 @@ import datetime
 
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models, transaction
+from django.db.models import ForeignKey, OneToOneField
 from django.db.models.fields.related import ForeignObjectRel
 from django.utils.encoding import is_protected_type
 from django.core.serializers.json import DjangoJSONEncoder
@@ -129,11 +130,11 @@ def get_all_child_relations(model):
     """
     fk_fields = [
         field for field in model._meta.get_fields()
-        if isinstance(field.remote_field, (models.ForeignKey, ParentalKey))
+        if isinstance(field.remote_field, ForeignKey)
     ]
     one_to_one_fields = [
         field.remote_field for field in model._meta.get_fields()
-        if isinstance(field, ParentalOneToOneField)
+        if isinstance(field, OneToOneField)
     ]
     return fk_fields + one_to_one_fields
 
