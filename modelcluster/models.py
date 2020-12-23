@@ -180,8 +180,8 @@ class ClusterableModel(models.Model):
         """
         Save the model and commit all child relations.
         """
-        child_relation_names = [rel.get_accessor_name() for rel in get_all_child_relations(self)]
-        child_m2m_field_names = [field.name for field in get_all_child_m2m_relations(self)]
+        child_relation_names = set(rel.get_accessor_name() for rel in get_all_child_relations(self))
+        child_m2m_field_names = set(field.name for field in get_all_child_m2m_relations(self))
 
         update_fields = kwargs.pop('update_fields', None)
         if update_fields is None:
@@ -189,28 +189,24 @@ class ClusterableModel(models.Model):
             relations_to_commit = child_relation_names
             m2m_fields_to_commit = child_m2m_field_names
         else:
-            real_update_fields = []
-            relations_to_commit = []
-            m2m_fields_to_commit = []
-            for field in update_fields:
-                if field in child_relation_names:
-                    relations_to_commit.append(field)
-                elif field in child_m2m_field_names:
-                    m2m_fields_to_commit.append(field)
-                else:
-                    real_update_fields.append(field)
+            update_fields = set(update_fields)
+            relations_to_commit = update_fields & child_relation_names
+            m2m_fields_to_commit = update_fields & child_m2m_field_names
+            used_fields = relations_to_commit | m2m_fields_to_commit
+            real_update_fields = update_fields - used_fields
 
         super(ClusterableModel, self).save(update_fields=real_update_fields, **kwargs)
 
+        Model = self._meta.model
         for relation in relations_to_commit:
-            mgr = getattr(self, relation)
-            if hasattr(mgr, 'commit'):
-                mgr.commit()
+            field = getattr(Model, relation)
+            if isinstance(field, (ParentalKey, ParentalOneToOneField)):
+                getattr(self, relation).commit()
 
-        for field in m2m_fields_to_commit:
-            mgr = getattr(self, field)
-            if hasattr(mgr, 'commit'):
-                mgr.commit()
+        for relation in m2m_fields_to_commit:
+            field = getattr(Model, relation)
+            if isinstance(field, ParentalManyToManyField):
+                getattr(self, relation).commit()
 
     def serializable_data(self):
         obj = get_serializable_data_for_fields(self)
