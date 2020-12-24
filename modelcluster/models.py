@@ -128,15 +128,9 @@ def get_all_child_relations(model):
     Return a list of RelatedObject records for child relations of the given model,
     including ones attached to ancestors of the model and one to one fields.
     """
-    fk_fields = [
-        field for field in model._meta.get_fields()
-        if isinstance(field.remote_field, ForeignKey)
-    ]
-    one_to_one_fields = [
-        field.remote_field for field in model._meta.get_fields()
-        if isinstance(field, OneToOneField)
-    ]
-    return fk_fields + one_to_one_fields
+    for field in model._meta.get_fields():
+        if isinstance(field.remote_field, ForeignKey):
+            yield field
 
 
 def get_all_child_m2m_relations(model):
@@ -144,10 +138,9 @@ def get_all_child_m2m_relations(model):
     Return a list of ParentalManyToManyFields on the given model,
     including ones attached to ancestors of the model
     """
-    return [
-        field for field in model._meta.get_fields()
-        if isinstance(field, ParentalManyToManyField)
-    ]
+    for field in model._meta.get_fields():
+        if isinstance(field, ParentalManyToManyField):
+            yield field
 
 
 class ClusterableModel(models.Model):
