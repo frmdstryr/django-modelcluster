@@ -2,11 +2,12 @@ from __future__ import unicode_literals
 
 import json
 import datetime
+from functools import partial
 
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models, transaction
 from django.db.models import ForeignKey, OneToOneField
-from django.db.models.fields.related import ForeignObjectRel
+from django.db.models.fields.related import ForeignObjectRel, OneToOneRel
 from django.utils.encoding import is_protected_type
 from django.core.serializers.json import DjangoJSONEncoder
 from django.conf import settings
@@ -206,12 +207,18 @@ class ClusterableModel(models.Model):
 
         for rel in get_all_child_relations(self):
             rel_name = rel.get_accessor_name()
-            children = getattr(self, rel_name).all()
-
-            if hasattr(rel.related_model, 'serializable_data'):
-                obj[rel_name] = [child.serializable_data() for child in children]
+            Model = rel.related_model
+            serialize = getattr(
+                Model, 'serializable_data', get_serializable_data_for_fields)
+            if isinstance(rel, OneToOneRel):
+                try:
+                    child = getattr(self, rel_name)
+                except Model.DoesNotExist:
+                    continue
+                obj[rel_name] = serialize(child)
             else:
-                obj[rel_name] = [get_serializable_data_for_fields(child) for child in children]
+                children = getattr(self, rel_name).all()
+                obj[rel_name] = [serialize(child) for child in children]
 
         for field in get_all_child_m2m_relations(self):
             if field.serialize:
@@ -245,25 +252,24 @@ class ClusterableModel(models.Model):
         for rel in child_relations:
             rel_name = rel.get_accessor_name()
             try:
-                child_data_list = data[rel_name]
+                child_data = data[rel_name]
             except KeyError:
                 continue
 
-            related_model = rel.related_model
-            if hasattr(related_model, 'from_serializable_data'):
+            Model = rel.related_model
+            deserializer = getattr(Model, 'from_serializable_data', None)
+            if deserializer is None:
+                deserializer = partial(model_from_serializable_data, args=(Model,))
+            if isinstance(rel, OneToOneRel):
+                value = deserializer(child_data)
+                setattr(obj, rel_name, value)
+            elif isinstance(rel, ParentalManyToManyField):
                 children = [
-                    related_model.from_serializable_data(child_data, check_fks=check_fks, strict_fks=True)
-                    for child_data in child_data_list
+                    deserializer(data, check_fks=check_fks, strict_fks=True)
+                    for data in child_data
                 ]
-            else:
-                children = [
-                    model_from_serializable_data(related_model, child_data, check_fks=check_fks, strict_fks=True)
-                    for child_data in child_data_list
-                ]
-
-            children = filter(lambda child: child is not None, children)
-
-            setattr(obj, rel_name, children)
+                value = filter(lambda child: child is not None, children)
+                setattr(obj, rel_name, value)
 
         return obj
 
